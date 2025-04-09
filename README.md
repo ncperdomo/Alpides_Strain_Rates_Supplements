@@ -24,8 +24,8 @@ The diagram below outlines the contents and organization of the supplementary ma
 
 - Combined GNSS velocities rotated into different reference frames are provided in the `combined_velocity_field` folder
 - Mean posterior strain rates and uncertainties are provided in the `strain_rate_data` folder
-- Ancillary files including the World Stress Map data, moho depths, fault traces, SKS data, and other supporting files can be found in the `input_data` folder 
-- Python modules required for plotting strain rates, harmonising GNSS velocity uncertainties and performing Metropolis MCMC inversions for fault kinematic parameters are included in the `input_data/modules` folder
+- Ancillary files including fault traces, SKS data, and other supporting files can be found in the `input_data` folder 
+- Python modules required for plotting strain rates, harmonising GNSS velocity uncertainties and performing Metropolis MCMC inversions of GNSS velocities for fault kinematic parameters are included in the `input_data/modules` folder
 
 ```markdown
 📦JGR_Alpides
