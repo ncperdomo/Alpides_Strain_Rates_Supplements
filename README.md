@@ -12,6 +12,7 @@
 The results and figures presented in our manuscript are fully reproducible. To replicate our analyses, run the Jupyter notebook ``JGR_Alpides_Supplements.ipynb`` included with the supplementary material. To manage dependencies and ensure reproducibility, we recommend creating a Conda environment using the provided "yml" file before running the Jupyter notebook. However, this step is not strictly required if you have already installed all necessary dependencies. If you choose to create a Conda environment, use the bash script below:
 
 ```bash
+conda install anaconda::git-lfs
 git clone https://github.com/ncperdomo/Alpides_Strain_Rates_Supplements.git
 cd Alpides_Strain_Rates_Supplements
 conda env create -f environment.yml
