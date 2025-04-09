@@ -1,0 +1,8 @@
+corner==2.2.2
+matplotlib==3.9.2
+numpy==2.1.2
+pandas==2.2.3
+pygmt==0.13.0
+scipy==1.14.1
+seaborn==0.13.2
+Shapely==2.0.6

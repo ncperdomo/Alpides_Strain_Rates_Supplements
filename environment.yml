@@ -1,0 +1,16 @@
+name: alpides
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  - ipykernel
+  - numpy=2.2.4
+  - scipy=1.15.2
+  - matplotlib=3.10.1
+  - pandas=2.2.3
+  - pygmt=0.14.2
+  - seaborn=0.13.2
+  - shapely=2.0.7
+  - corner=2.2.3
+  - xarray=2025.3.0
