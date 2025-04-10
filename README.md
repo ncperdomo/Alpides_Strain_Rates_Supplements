@@ -7,9 +7,9 @@
 ###  <p align=center> N. Castro-Perdomo et al., (2025) </p>
 ###  <p align=center> Corresponding author: N. Castro-Perdomo, jcastrop@iu.edu </p>
 ---
+The results and figures presented in our manuscript are fully reproducible. To replicate our analyses, run the Jupyter notebook ``JGR_Alpides_Supplements.ipynb`` included with this repository.
 
 ## **Instructions:**
-The results and figures presented in our manuscript are fully reproducible. To replicate our analyses, run the Jupyter notebook ``JGR_Alpides_Supplements.ipynb`` included with this repository.
 
 ### **1. Install Git Large File Storage (LFS)**
 
