@@ -1,5 +1,6 @@
 [![Language](https://img.shields.io/badge/python-3%2B-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/ncperdomo/Alpides_Strain_Rates_Supplements/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15186334.svg)](https://doi.org/10.5281/zenodo.15186334)
 ---
 #  <p align=center> **Supplementary material for "Strain Rates along the Alpine-Himalayan Belt from a Comprehensive GNSS Velocity Field"** </p>
 
