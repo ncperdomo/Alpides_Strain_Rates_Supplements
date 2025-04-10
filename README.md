@@ -9,19 +9,61 @@
 ---
 
 ## **Instructions:**
-The results and figures presented in our manuscript are fully reproducible. To replicate our analyses, run the Jupyter notebook ``JGR_Alpides_Supplements.ipynb`` included with the supplementary material. To manage dependencies and ensure reproducibility, we recommend creating a Conda environment using the provided "yml" file before running the Jupyter notebook. However, this step is not strictly required if you have already installed all necessary dependencies. If you choose to create a Conda environment, use the bash script below:
+The results and figures presented in our manuscript are fully reproducible. To replicate our analyses, run the Jupyter notebook ``JGR_Alpides_Supplements.ipynb`` included with this repository.
+
+### **1. Install Git Large File Storage (LFS)**
+
+Before cloning the repository, make sure Git Large File Storage (LFS) is installed. Use the appropriate command based on your operating system:
+
+- **macOS (Homebrew):**
+```bash
+brew install git-lfs
+```
+
+- **macOS (MacPorts):**
+```bash
+port install git-lfs
+```
+
+- **Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install git-lfs
+```
+
+### **2. Clone the repository**
+
+Once Git LFS is installed, clone the repository:
 
 ```bash
-conda install anaconda::git-lfs
 git clone https://github.com/ncperdomo/Alpides_Strain_Rates_Supplements.git
 cd Alpides_Strain_Rates_Supplements
+```
+
+### **3. Set up the Conda environment (optional but recommended)**
+
+To manage dependencies and ensure reproducibility, we recommend creating a Conda environment using the provided `environment.yml` file. This step is optional if all required packages are already installed on your system.
+
+To create and activate the Conda environment, run:
+
+```bash
 conda env create -f environment.yml
 conda activate alpides
+```
+
+### **4. Launch the Jupyter notebook**
+
+Start the Jupyter notebook to reproduce the manuscript's results:
+
+```bash
 jupyter notebook JGR_Alpides_Supplements.ipynb
 ```
+
+---
+
 ## **Directory structure**
 
-The diagram below outlines the contents and organization of the supplementary material provided with our manuscript.
+The diagram below outlines the contents and organization of the supplementary material provided with this repository.
 
 - Combined GNSS velocities rotated into different reference frames are provided in the `combined_velocity_field` folder
 - Mean posterior strain rates and uncertainties are provided in the `strain_rate_data` folder
@@ -29,7 +71,7 @@ The diagram below outlines the contents and organization of the supplementary ma
 - Python modules required for plotting strain rates, harmonising GNSS velocity uncertainties and performing Metropolis MCMC inversions of GNSS velocities for fault kinematic parameters are included in the `input_data/modules` folder
 
 ```markdown
-📦JGR_Alpides
+📦Alpides_Strain_Rates_Supplements
  ┣ 📜JGR_Alpides_Supplements.ipynb
  ┣ 📂combined_velocity_field
  ┃ ┣ 📜combined_vel_aege_clean_scaled.csv
