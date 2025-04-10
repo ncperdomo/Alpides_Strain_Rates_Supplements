@@ -59,16 +59,18 @@ Start the Jupyter notebook to reproduce the manuscript's results:
 jupyter notebook JGR_Alpides_Supplements.ipynb
 ```
 
+If ``alpides`` does not appear in the Jupyter notebook's kernel list, you can manually register it:
+
+```bash
+python -m ipykernel install --user --name alpides --display-name "Python (alpides)"
+```
+After registering the kernel, **restart Jupyter Notebook** to ensure the new kernel appears in the kernel list.
+
 ---
 
 ## **Directory structure**
 
 The diagram below outlines the contents and organization of the supplementary material provided with this repository.
-
-- Combined GNSS velocities rotated into different reference frames are provided in the `combined_velocity_field` folder
-- Mean posterior strain rates and uncertainties are provided in the `strain_rate_data` folder
-- Ancillary files including fault traces, SKS data, and other supporting files can be found in the `input_data` folder 
-- Python modules required for plotting strain rates, harmonising GNSS velocity uncertainties and performing Metropolis MCMC inversions of GNSS velocities for fault kinematic parameters are included in the `input_data/modules` folder
 
 ```markdown
 📦Alpides_Strain_Rates_Supplements
@@ -105,3 +107,8 @@ The diagram below outlines the contents and organization of the supplementary ma
  ┣ 📜requirements.txt
  ┗ 📜runtime.txt
 ```
+
+- Combined GNSS velocities rotated into different reference frames are provided in the `combined_velocity_field` folder
+- Mean posterior strain rates and uncertainties are provided in the `strain_rate_data` folder
+- Ancillary files including fault traces, SKS data, and other supporting files can be found in the `input_data` folder 
+- Python modules required for plotting strain rates, harmonizing GNSS velocity uncertainties and performing Metropolis MCMC inversions of GNSS velocities for fault kinematic parameters are included in the `input_data/modules` folder
