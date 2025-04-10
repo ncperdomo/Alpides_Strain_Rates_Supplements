@@ -91,11 +91,10 @@ The diagram below outlines the contents and organization of the supplementary ma
  ┃ ┣ 📜combined_vel_yang_clean_scaled.csv
  ┃ ┗ 📜combined_vertical_velocity_field.vel
  ┣ 📂strain_rate_data
- ┃ ┣ 📜strain_rates_ALPIDES_JGR.csv
- ┃ ┣ 📜strain_rates_EMED_creep_JGR.csv
- ┃ ┣ 📜strain_rates_EMED_nocreep_JGR.csv
- ┃ ┣ 📜strain_rates_India_Asia_JGR.csv
- ┃ ┗ 📜strain_rates_MED_creep.csv
+ ┃ ┣ 📜strain_rates_ALPIDES.csv
+ ┃ ┣ 📜strain_rates_EMED_creep.csv
+ ┃ ┣ 📜strain_rates_EMED_nocreep.csv
+ ┃ ┣ 📜strain_rates_India_Asia.csv
  ┣ 📂input_data
  ┃ ┣ 📂cpts
  ┃ ┣ 📂datasets
