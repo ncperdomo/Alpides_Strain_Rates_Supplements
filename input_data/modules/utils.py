@@ -929,7 +929,9 @@ def plot_strain_rates_with_principal_directions(
     strain_profile_file_smoothed_with_creep=None, plot_profile_box=False, box_coords=None, label_coords=None, faults_pen="0.1p,darkgrey", mask_polygons=None, 
     apply_mask=False, mask_dilatation_map=False, plot_mask_polygons=False, mask_fill="white", add_tectonic_map_labels=False, path2_tectonic_map_labels=None, 
     tectonic_map_labels_offset=[0,0], tectonic_map_labels_transparency=30, range_dilatation_sigma=[-50, 50], range_sec_inv_sigma=[0, 50], range_max_shear_sigma=[0, 50], 
-    map_projection='M20c', scatter_style="c0.18c", save_fig=True
+    map_projection='M20c', scatter_style="c0.18c", save_fig=True,
+    vertical_velocity_file=None,
+    vertical_radius_km=111.0
 ):
     """
     This function reads strain rates exported from BforStrain and estimates different strain rate tensor 
@@ -986,13 +988,38 @@ def plot_strain_rates_with_principal_directions(
         # Correct longitude values to be between -180 and 180
         kostrov_data.loc[kostrov_data["lon"] > 180, "lon"] -= 360
 
-        # Calculate strain rate parameters
-        kostrov_data["emean"] = (kostrov_data["ett"] + kostrov_data["epp"]) / 2.0
-        kostrov_data["ediff"] = (kostrov_data["ett"] - kostrov_data["epp"]) / 2.0
-        kostrov_data["taumax"] = np.sqrt(kostrov_data["erp"]**2 + kostrov_data["ediff"]**2)
-        kostrov_data["emax"] = kostrov_data["emean"] + kostrov_data["taumax"]
-        kostrov_data["emin"] = kostrov_data["emean"] - kostrov_data["taumax"]
-        kostrov_data["sr_style"] = -(kostrov_data["emax"] + kostrov_data["emin"]) / (np.abs(kostrov_data["emax"]) + np.abs(kostrov_data["emin"]))
+        # Extract 2D horizontal tensor components (theta-theta, theta-phi, phi-phi)
+        H_xx = kostrov_data["ett"].astype(float).values
+        H_xy = kostrov_data["etp"].astype(float).values
+        H_yy = kostrov_data["epp"].astype(float).values
+
+        # Normalize the 2D tensor by its Frobenius norm: ||H||_F = sqrt(H_xx^2 + H_yy^2 + 2 H_xy^2)
+        frob = np.sqrt(H_xx**2 + H_yy**2 + 2.0 * H_xy**2)
+        valid = frob > 0
+        H_xx_n = np.zeros_like(H_xx)
+        H_xy_n = np.zeros_like(H_xy)
+        H_yy_n = np.zeros_like(H_yy)
+        H_xx_n[valid] = H_xx[valid] / frob[valid]
+        H_xy_n[valid] = H_xy[valid] / frob[valid]
+        H_yy_n[valid] = H_yy[valid] / frob[valid]
+
+        # print message if any normalized magnitude is different from 1
+        if not np.allclose(np.sqrt(H_xx_n**2 + H_yy_n**2 + 2.0 * H_xy_n**2)[valid], 1.0):
+            print("Warning: Some normalized Kostrov tensor magnitudes are not equal to 1")  
+
+        # Compute principal values from the normalized 2D tensor
+        emean = 0.5 * (H_xx_n + H_yy_n)
+        ediff = 0.5 * (H_xx_n - H_yy_n)
+        taumax = np.sqrt(H_xy_n**2 + ediff**2)
+        emax = emean + taumax
+        emin = emean - taumax
+
+        denom = np.abs(emax) + np.abs(emin)
+        sr_style = np.full_like(emax, np.nan)
+        nz = denom > 0
+        sr_style[nz] = -(emax[nz] + emin[nz]) / denom[nz]
+
+        kostrov_data["sr_style"] = sr_style
 
         # Here I remove NaNs and raise an error if no valid data is available
         valid_kostrov_data = kostrov_data[["lon", "lat", "sr_style"]].dropna()
@@ -1382,8 +1409,8 @@ def plot_strain_rates_with_principal_directions(
         fig.savefig(f"{output_folder}/{output_filenames_prefix}_Mean_Dilatation_Rates_Map.pdf", dpi=600)
     fig.show()
 
-    ################################## Plot Second Invariant of the Strain Rate Tensor #####################################
-    print(f"Interpolated mean second invariant of the strain rate tensor:")
+    ################################## Plot Frobenius norm of the Strain Rate Tensor #####################################
+    print(f"Interpolated mean Frobenius norm of the strain rate tensor:")
     fig = pygmt.Figure()
     pygmt.makecpt(cmap=sec_inv_cpt, truncate=[0.05, 1], series=[range_sec_inv[0], range_sec_inv[1]], background='o', output="input_data/cpts/turbo_part.cpt")
     # Read in the Turbo part and prepend white for 0 to 0.01 microstrain/yr (i.e., 0 to 10 nanostrain/yr)
@@ -1411,7 +1438,7 @@ def plot_strain_rates_with_principal_directions(
 
     fig.coast(water=ocean_fill_color, shorelines=shorelines_pen,
               area_thresh=4000, resolution='h')
-    fig.colorbar(frame=['xaf+lSecond invariant of the strain rate tensor', 'y+l10@+-9@+/yr'],
+    fig.colorbar(frame=['xaf+lFrobenius norm of the horizontal strain rate tensor', 'y+l10@+-9@+/yr'],
                  position=f"JMR+o0.5c/0c+w{colorbar_width}c+v+ef")
     fig.plot(data=fault_file, pen=faults_pen)
     if "EMED" in output_filenames_prefix and plot_strain_comparison:
@@ -1495,7 +1522,7 @@ def plot_strain_rates_with_principal_directions(
             fig.plot(x=45.2, y=35.3, style="r6.5/5.3", fill="white", pen=None, transparency=30)
             # Shift origin for the creeping segment profile
             fig.shift_origin(xshift="14.8c", yshift="0.3c")
-            fig.basemap(region=inset_region, projection="X5c/4.1c", frame=['WNse+gwhite', 'xaf+lAcross-fault distance (km)', 'yaf+lSecond Invariant (nanostrain/yr)'])
+            fig.basemap(region=inset_region, projection="X5c/4.1c", frame=['WNse+gwhite', 'xaf+lAcross-fault distance (km)', 'yaf+lFrobenius norm (nanostrain/yr)'])
             # Plot raw data for no-creep as blue crosses
             fig.plot(x=data_raw_no_creep[:, 0], y=data_raw_no_creep[:, 1],
                      style="c0.15c", fill="39/39/43", pen="0.5p,70", transparency=50, label=f'Creep ignored+S0.15c')
@@ -1536,7 +1563,7 @@ def plot_strain_rates_with_principal_directions(
     # --- END inset ---
 
     if save_fig:
-        fig.savefig(f"{output_folder}/{output_filenames_prefix}_Second_Invariant_Strain_Rates_Map.pdf", dpi=600)
+        fig.savefig(f"{output_folder}/{output_filenames_prefix}_Strain_Rate_Map.pdf", dpi=600)
     fig.show()
 
     ########################################################################################################################
@@ -1581,8 +1608,8 @@ def plot_strain_rates_with_principal_directions(
             fig.savefig(f"{output_folder}/{output_filenames_prefix}_Std_Dilatation_Rates_Map.pdf", dpi=600)
         fig.show()
 
-        # Plot standard deviation of second invariant
-        print(f"Interpolated 1-sigma standard deviation of the second invariant:")
+        # Plot standard deviation of Frobenius norm
+        print(f"Interpolated 1-sigma standard deviation of the Frobenius norm:")
         fig = pygmt.Figure()
         fig.basemap(region=region, projection=map_projection, frame='af')
         pygmt.makecpt(cmap=sec_inv_cpt, series=range_sec_inv_sigma, background='o')
@@ -1600,14 +1627,14 @@ def plot_strain_rates_with_principal_directions(
               area_thresh=4000, resolution='h')
         #fig.colorbar(frame=['xaf+lSecond invariant 1@~\163@~ uncertainty', 'y+l10@+-9@+/yr'],
         #         position=f"JMR+o0.5c/0c+w{colorbar_width}c+v")
-        fig.colorbar(frame=['xaf+lSecond invariant 1@~\163@~ uncertainty', 'y+l10@+-9@+/yr'],
+        fig.colorbar(frame=['xaf+lFrobenius norm 1@~\163@~ uncertainty', 'y+l10@+-9@+/yr'],
                  position=f"JMR+o0.5c/0c+w{colorbar_width}c+v+ef")
         fig.plot(data=fault_file, pen="0.1p,darkgrey")
         with pygmt.config(FONT_ANNOT_PRIMARY='8p', FONT_LABEL='8p'):
             fig.basemap(map_scale=f"g{map_scale_bar_position[0]}/{map_scale_bar_position[1]}+w{map_scale_bar_length_km}k+f+lkm")
         
         if save_fig:
-            fig.savefig(f"{output_folder}/{output_filenames_prefix}_Std_Second_Invariant_Map.pdf", dpi=600)
+            fig.savefig(f"{output_folder}/{output_filenames_prefix}_Std_Frobenius_norm_Map.pdf", dpi=600)
         fig.show()
 
         # Plot standard deviation of Mean Max. Shear Strain Rates
@@ -1905,7 +1932,423 @@ def plot_strain_rates_with_principal_directions(
         fig.savefig(f"{output_folder}/{output_filenames_prefix}_Strain_Azimuths_Map.pdf", dpi=600)
     fig.show()
 
+    ########################################################################################################################
+    ################################## Correlation map: dilatation vs vertical GNSS velocity ###############################
+    ########################################################################################################################
+    if vertical_velocity_file is not None:
+        print(f"Local correlation map between dilatation rates and vertical GNSS velocity field (radius={vertical_radius_km} km)...")
+
+        # Load vertical velocity data with header (columns: Lon,Lat,U.vel,U.sig,Stat)
+        vert_vel_df = pd.read_csv(vertical_velocity_file, sep=',', header=0)
+        vert_vel_df = vert_vel_df.rename(columns={"Lon": "lon", "Lat": "lat", "U.vel": "vertical_velocity"})
+
+        # Only use actual vertical GNSS stations within radius, no interpolation
+        vert_vel_df = vert_vel_df.dropna(subset=["lon", "lat", "vertical_velocity"])
+        grid_mask = (interp_data['sec_inv'] >= 10) & (~interp_data['dilat'].isna())
+        grid_points = interp_data.loc[grid_mask, ['lon', 'lat', 'dilat']].copy()
+
+        vel_tree = cKDTree(vert_vel_df[['lon', 'lat']].values)
+        local_prod = np.full(len(grid_points), np.nan)
+        n_stations = np.zeros(len(grid_points), dtype=int)
+        median_verts = np.full(len(grid_points), np.nan)
+
+        # For each grid point compute number of nearby verticals and their median.
+        # Save results so the categorical map uses the exact same station counts / medians
+        for i, (lon, lat) in enumerate(grid_points[['lon', 'lat']].values):
+            idxs = vel_tree.query_ball_point([lon, lat], vertical_radius_km / 111.0)
+            n = len(idxs)
+            if n >= 3:  # Minimum number of verticals to consider
+                vvals = vert_vel_df.iloc[idxs]['vertical_velocity'].values
+                dilat_val = grid_points.iloc[i]['dilat']
+                median_vert = np.median(vvals)
+                local_prod[i] = dilat_val * median_vert
+                n_stations[i] = n
+                median_verts[i] = median_vert
+
+        # Attach station counts and median verticals to the grid_points dataframe
+        grid_points = grid_points.reset_index(drop=True)
+        grid_points['n_vert'] = n_stations
+        grid_points['median_vert'] = median_verts
+
+        # Plot map of normalized product
+        fig = pygmt.Figure()
+        fig.basemap(region=region, projection=map_projection, frame='af')
+        plot_mask = ~np.isnan(local_prod)
+        # Normalize correlation results to [0, 1]
+        if np.any(plot_mask):
+            p2, p98 = np.nanpercentile(local_prod[plot_mask], [2, 98])
+            # Preserve sign: scale to [-1, 1] using percentiles
+            norm_map = np.zeros_like(local_prod[plot_mask])
+            mask_pos = local_prod[plot_mask] >= 0
+            mask_neg = local_prod[plot_mask] < 0
+            # Positive values normalized to [0, 1]
+            if p98 > 0:
+                norm_map[mask_pos] = np.clip(local_prod[plot_mask][mask_pos] / p98, 0, 1)
+            # Negative values normalized to [-1, 0]
+            if p2 < 0:
+                norm_map[mask_neg] = -np.clip(local_prod[plot_mask][mask_neg] / p2, 0, 1)
+            vmin, vmax = -1, 1
+        else:
+            norm_map = local_prod[plot_mask]
+            vmin, vmax = -1, 1
+        pygmt.makecpt(cmap="vik", series=[vmin, vmax])
+        fig.plot(
+            x=grid_points['lon'].values[plot_mask],
+            y=grid_points['lat'].values[plot_mask],
+            style=scatter_style,
+            fill=norm_map,
+            cmap=True,
+            pen=None
+        )
+        fig.colorbar(frame=r'af+lNormalized (dilatation rate @~\327@~ median vertical velocity)', position=f"JMR+o0.5c/0c+w{colorbar_width}c+v")
+        fig.coast(water=ocean_fill_color, shorelines=shorelines_pen, area_thresh=4000, resolution='h')
+        fig.plot(data=fault_file, pen=faults_pen)
+        fig.text(
+            x=region[1] - 1,
+            y=region[3] - 0.5,
+            text=f"Analysis radius: {int(vertical_radius_km/111.0)}°",
+            font="10p,Helvetica,black",
+            fill="white",
+            justify="TR",
+            pen="0.1p,black"
+        )
+        if save_fig:
+            fig.savefig(f"{output_folder}/{output_filenames_prefix}_Local_Normalized_Ratio_Map.pdf", dpi=600)
+        fig.show()
+
+        ########################################################################################################################
+        # --- Categorical map: Dilatation rate & vertical GNSS velocity combinations ---
+        ########################################################################################################################
+        print("Plotting categorical map of dilatation rate and vertical GNSS velocity combinations...")
+
+        # Prepare data: use grid_points (from correlation map) and vert_vel_df
+        # Classify dilatation: extension (>0), shortening (<0), neutral (≈0)
+        dilat_thresh = 3  # nanostrain/yr threshold for neutral
+        grid_points = grid_points.copy()
+        grid_points['dilat_class'] = np.where(
+            grid_points['dilat'] > dilat_thresh, 'Extension',
+            np.where(grid_points['dilat'] < -dilat_thresh, 'Shortening', 'Neutral')
+        )
+
+        # For each grid point, assign vertical velocity class using the precomputed median and station counts
+        vert_thresh = 0.1  # mm/yr threshold for neutral (lower value for more sensitivity)
+
+        def classify_vertical(row):
+            # Require at least 3 vertical stations
+            if np.isnan(row['median_vert']) or row['n_vert'] < 3:
+                return np.nan
+            mv = row['median_vert']
+            if mv > vert_thresh:
+                return 'Uplift'
+            elif mv < -vert_thresh:
+                return 'Subsidence'
+            else:
+                return 'Neutral'
+
+        grid_points['vert_class'] = grid_points.apply(classify_vertical, axis=1)
+
+        # Keep only points with at least 3 verticals
+        grid_points = grid_points[grid_points['n_vert'] >= 3].copy()
+
+        # Combine classes
+        grid_points['cat_class'] = grid_points['dilat_class'] + ' & ' + grid_points['vert_class']
+
+        # Define categorical colormap (dict: class -> color)
+        cat_colors = {
+            'Extension & Uplift': '221/4/38',  # red
+            'Extension & Neutral': '241/143/1', # orange
+            'Extension & Subsidence': '255/228/153', # light yellow
+            'Shortening & Uplift': '36/123/160',  # cerulean (my favourite shade of blue!)
+            'Shortening & Neutral': '184/101/175', # purple
+            'Shortening & Subsidence': '214/169/154', #  light brown
+            'Neutral & Uplift': '77/170/87',  # green
+            'Neutral & Neutral': '214/214/214', # gray
+            'Neutral & Subsidence': '160/236/208', # Aquamarine
+        }
+
+        # Map class to color
+        grid_points['cat_color'] = grid_points['cat_class'].map(cat_colors)
+
+        # Plot categorical map
+        fig = pygmt.Figure()
+        fig.basemap(region=region, projection=map_projection, frame='af')
+        # Plot points by category
+        # Only plot points where cat_class is not NaN
+        valid_mask = ~grid_points['cat_class'].isna()
+        for cat, color in cat_colors.items():
+            mask = (grid_points['cat_class'] == cat) & valid_mask
+            if np.any(mask):
+                fig.plot(
+                    x=grid_points['lon'][mask],
+                    y=grid_points['lat'][mask],
+                    style=scatter_style,
+                    fill=color,
+                    pen=None,
+                    label=cat
+                )
+        fig.coast(water=ocean_fill_color, shorelines=shorelines_pen, area_thresh=4000, resolution='h')
+        fig.plot(data=fault_file, pen=faults_pen)
+        # Add legend
+        fig.legend(position="JBL+jBL+o0.2c", box="+gwhite+p0.5p")
+        #fig.text(
+        #    x=region[1] - 1,
+        #    y=region[3] - 0.5,
+        #    text="Dilatation & Vertical Velocity Categories",
+        #    font="10p,Helvetica,black",
+        #    fill="white",
+        #    justify="TR",
+        #    pen="0.1p,black"
+        #)
+        if save_fig:
+            fig.savefig(f"{output_folder}/{output_filenames_prefix}_Dilatation_Vertical_Categorical_Map.pdf", dpi=600)
+        fig.show()
+
+        ########################################################################################################################
+        #  --- Misfit map between GNSS and Kostrov strain tensors (Inspired by the approach in Flech et al., 2007 eq. 22) ---
+        ########################################################################################################################
+        if include_kostrov and not valid_kostrov_data.empty:
+            print("Computing misfit map (Flech_2007 eq. 22) between GNSS and Kostrov strain tensors...")
+            # Interpolate seismic (Kostrov) tensor components to GNSS grid.
+            # Expecting spherical components: rr, rt, rp, tt, tp, pp (r=Up, theta=S, phi=E).
+            # If those columns are missing, try the older names (ett, etp, epp) and warn.
+            # Require full spherical components in Kostrov data: err, ert, erp, ett, etp, epp
+            sph_comps = ['err', 'ert', 'erp', 'ett', 'etp', 'epp']
+            missing_sph = [c for c in sph_comps if c not in kostrov_data.columns]
+            if missing_sph:
+                raise ValueError(f'Kostrov data missing required tensor columns: {missing_sph}. Expected {sph_comps}.')
+
+            # Interpolate all spherical components (spherical ordering: r,theta,phi -> U,S,E)
+            for comp in sph_comps:
+                interp = griddata(
+                    kostrov_data[['lon', 'lat']].values,
+                    kostrov_data[comp].values,
+                    (interp_data['lon'], interp_data['lat']),
+                    method='linear'
+                )
+                interp_data[f'kostrov_{comp}_interp'] = interp
+            # We require full spherical components in the Kostrov data and will convert them to ENU
+            print("Kostrov: using spherical components (err,ert,erp,ett,etp,epp) -> converting to ENU.")
+
+            # Compute dot product between normalized (unit) 2D tensors (East-North components)
+            product_map = np.full(len(interp_data), np.nan)
+            # rotation matrix from spherical (r,theta,phi) basis where theta=S, phi=E to ENU (E,N,U)
+            R = np.array([[0, 0, 1], [0, -1, 0], [1, 0, 0]])
+
+            # Counters for debugging
+            total_pts = len(interp_data)
+            # Note: sec_inv filtering should apply to geodetic-only derived plots
+            # For the tensor-product misfit we compute the comparison regardless of GNSS sec_inv
+            cnt_skipped_secinv = 0
+            cnt_missing_seis = 0
+            cnt_zero_norm = 0
+            cnt_valid = 0
+
+            print(f"Tensor product: processing {total_pts} grid points (will compute/plot only where GNSS sec_inv >= 10 nanostrain/yr).")
+
+            for idx, (_, row) in enumerate(interp_data.iterrows()):
+
+                # geodetic horizontal tensor (East, North)
+                # Only compute comparison where GNSS-derived second invariant is large enough
+                if row.get('sec_inv', 0) < 10:
+                    product_map[idx] = np.nan
+                    cnt_skipped_secinv += 1
+                    continue
+
+                try:
+                    T_g = np.array([[row['Exx_mean'], row['Exy_mean']], [row['Exy_mean'], row['Eyy_mean']]], dtype=float)
+                except Exception:
+                    product_map[idx] = np.nan
+                    continue
+
+                # read interpolated spherical components (required)
+                err = row.get('kostrov_err_interp', np.nan)
+                ert = row.get('kostrov_ert_interp', np.nan)
+                erp = row.get('kostrov_erp_interp', np.nan)
+                ett = row.get('kostrov_ett_interp', np.nan)
+                etp = row.get('kostrov_etp_interp', np.nan)
+                epp = row.get('kostrov_epp_interp', np.nan)
+                if np.any(np.isnan([err, ert, erp, ett, etp, epp])):
+                    product_map[idx] = np.nan
+                    cnt_missing_seis += 1
+                    continue
+
+                # build spherical tensor in (r,theta,phi) = (U,S,E) ordering
+                T_sph = np.array([[err, ert, erp], [ert, ett, etp], [erp, etp, epp]], dtype=float)
+                # rotate to ENU: T_enu = R * T_sph * R.T
+                T_enu = R.dot(T_sph).dot(R.T)
+                # extract horizontal block (E,N)
+                T_h = T_enu[np.ix_([0, 1], [0, 1])]
+
+                # normalize tensors (Frobenius norm)
+                norm_g = np.linalg.norm(T_g, 'fro')
+                norm_h = np.linalg.norm(T_h, 'fro')
+                if norm_g == 0 or norm_h == 0 or np.isnan(norm_g) or np.isnan(norm_h):
+                    product_map[idx] = np.nan
+                    cnt_zero_norm += 1
+                    continue
+                A = T_g / norm_g
+                B = T_h / norm_h
+                # Frobenius inner product
+                prod = np.sum(A * B)
+                # clamp to [-1,1]
+                prod = max(-1.0, min(1.0, float(prod)))
+                product_map[idx] = prod
+                cnt_valid += 1
+
+            # Print debugging summary
+            print(f"Tensor product summary: total={total_pts}, valid={cnt_valid}, skipped_sec_inv={cnt_skipped_secinv}, missing_seismic={cnt_missing_seis}, zero_norm={cnt_zero_norm}")
+
+            # Plot product map (values in [-1, 1]) where 1 = identical orientation/shape
+            print("Plotting tensor product map (1 = identical normalized tensors)...")
+            fig = pygmt.Figure()
+            fig.basemap(region=plot_region, projection=map_projection, frame='af')
+            # Show only points with computed product AND GNSS sec_inv >= 10
+            mask = (~np.isnan(product_map)) & (interp_data['sec_inv'].values >= 10)
+            vmin, vmax = -1, 1
+            pygmt.makecpt(cmap="roma", series=[vmin, vmax])
+            xs = np.asarray(interp_data['lon'].values[mask], dtype=float)
+            ys = np.asarray(interp_data['lat'].values[mask], dtype=float)
+            fills = np.asarray(product_map[mask], dtype=float)
+            fig.plot(
+                x=xs,
+                y=ys,
+                style=scatter_style,
+                fill=fills,
+                cmap=True,
+                pen=None
+            )
+            xlabel = r'Normalized tensor dot product (@~e@~@-geod@- @~\327@~ @~e@~@-seis@-)'  # testing special characters in the label....
+            fig.colorbar(frame=f'af+l{xlabel}', position=f"JMR+o0.5c/0c+w{colorbar_width}c+v")
+            fig.coast(water=ocean_fill_color, shorelines=shorelines_pen, area_thresh=4000, resolution='h')
+            fig.plot(data=fault_file, pen=faults_pen)
+            
+            # Add explanatory box in bottom left with strain rate cross examples
+            # Box positioning and sizing parameters (easy to adjust)
+            box_margin_x = 1.5  # Distance from left edge
+            box_margin_y = 1.5   # Distance from bottom edge
+            box_height = 20     # Box height
+            
+            # Cross display parameters
+            cross_size = "0.3c"         # Size of strain rate crosses
+            example_scale = 1.0          # Magnitude for visual clarity
+            horizontal_spacing = 9.0    # Space between geodetic and seismic crosses
+            vertical_spacing = 5.0      # Space between different examples
+            margin_inside_box = 0.5     # Margin inside the box
+            content_horizontal_shift = 8.5  # Horizontal shift for all box content (positive = right)
+            content_vertical_shift = -7.0    # Vertical shift for all box content (positive = up, negative = down)
+            shift_dots = -0.4  # Horizontal shift for dots and equals signs (positive = right)
+
+            # Calculate box position
+            box_x = plot_region[0] + box_margin_x
+            box_y = plot_region[2] + box_margin_y
+            
+            rectangle_width = 3.3
+            rectangle_height = 2.7
+            # Draw white background box using rectangle symbol to avoid projection distortion
+            fig.plot(
+                x=-7.0,
+                y=15.5,
+                style=f"r{rectangle_width}c/{rectangle_height}c",
+                fill="white",
+                pen="0.5p,black",
+            )
+
+            # ============================================
+            # Shared scale for the 45° rotated components
+            # ============================================
+            s = example_scale  # axis length used below
+
+            # ============================================
+            # Example 1: Perfect match (= +1)
+            # ============================================
+            ex1_x = box_x + margin_inside_box + content_horizontal_shift
+            ex1_y = box_y + box_height - margin_inside_box + content_vertical_shift
+
+            # Geodetic cross (blue shortening vertical, red extension horizontal)
+            fig.velo(data=[[ex1_x - horizontal_spacing/2, ex1_y, 0, -example_scale, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,navy", fill='navy')
+            fig.velo(data=[[ex1_x - horizontal_spacing/2, ex1_y, example_scale, 0, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,red2", fill='red2')
+
+            # Seismic cross (identical)
+            fig.velo(data=[[ex1_x + horizontal_spacing/2, ex1_y, 0, -example_scale, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,navy", fill='navy')
+            fig.velo(data=[[ex1_x + horizontal_spacing/2, ex1_y, example_scale, 0, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,red2", fill='red2')
+
+            # Labels
+            fig.text(text="Geodetic", x=ex1_x - horizontal_spacing/2, y=ex1_y + 3.5, font="8p", justify="CB")
+            fig.text(text="Seismic",  x=ex1_x + horizontal_spacing/2, y=ex1_y + 3.5, font="8p", justify="CB")
+            fig.text(text="•", x=ex1_x, y=ex1_y+shift_dots, font="12p", justify="CM")
+            fig.text(text="= 1", x=ex1_x + horizontal_spacing + 0.2, y=ex1_y, font="10p,Helvetica-Bold", justify="LM")
+
+
+            # ============================================
+            # Example 2: Orthogonal (= 0)
+            # (KEEP ONLY THIS BLOCK FOR EX.2)
+            # ============================================
+            ex2_x = box_x + margin_inside_box + content_horizontal_shift
+            ex2_y = ex1_y - vertical_spacing
+
+            # Geodetic cross (principal frame)
+            fig.velo(data=[[ex2_x - horizontal_spacing/2, ex2_y, 0, -example_scale, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,navy", fill='navy')        # blue vertical (convergent)
+            fig.velo(data=[[ex2_x - horizontal_spacing/2, ex2_y, example_scale, 0, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,red2", fill='red2')        # red horizontal (divergent)
+
+            # Seismic cross (rotated by +45°)
+            #s45 = example_scale / 2**0.5   # scale down by sqrt(2)
+            fig.velo(data=[[ex2_x + horizontal_spacing/2, ex2_y,  s, 0, 45]], spec=f'x{cross_size}',
+                    pen="thinnest,red2", fill='red2')        # red along +45°
+            fig.velo(data=[[ex2_x + horizontal_spacing/2, ex2_y,  0,-s, 45]], spec=f'x{cross_size}',
+                    pen="thinnest,navy", fill='navy')        # blue along −45° (convergent)
+
+            # Labels
+            fig.text(text="•", x=ex2_x, y=ex2_y+shift_dots, font="12p", justify="CM")
+            fig.text(text="= 0", x=ex2_x + horizontal_spacing + 0.2, y=ex2_y, font="10p,Helvetica-Bold", justify="LM")
+
+
+            # ============================================
+            # Example 3: Opposite (= -1)
+            # ============================================
+            ex3_x = box_x + margin_inside_box + content_horizontal_shift
+            ex3_y = ex2_y - vertical_spacing
+
+            # Geodetic cross
+            fig.velo(data=[[ex3_x - horizontal_spacing/2, ex3_y, 0, -example_scale, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,navy", fill='navy')
+            fig.velo(data=[[ex3_x - horizontal_spacing/2, ex3_y, example_scale, 0, 90]], spec=f'x{cross_size}',
+                    pen="thinnest,red2", fill='red2')
+
+            # Seismic cross (opposite sense to geodetic)
+            fig.velo(data=[[ex3_x + horizontal_spacing/2, ex3_y, s, 0, 0]], spec=f'x{cross_size}', 
+                     pen="thinnest,red2", fill='red2') # RED: major axis at 0° (N-S), extension 
+            fig.velo(data=[[ex3_x + horizontal_spacing/2, ex3_y, 0, -s, 0]], spec=f'x{cross_size}', 
+                     pen="thinnest,navy", fill='navy') # BLUE: minor axis (E-W), convergent
+
+            # Labels
+            fig.text(text="•", x=ex3_x, y=ex3_y+shift_dots, font="12p", justify="CM")
+            fig.text(text="= -1", x=ex3_x + horizontal_spacing + 0.2, y=ex3_y, font="10p,Helvetica-Bold", justify="LM")
+            
+            # Add legend for cross colors in the right side of the box
+            #legend_x = box_x + box_width - 1.5
+            #fig.text(text="Compression", x=legend_x, y=ex1_y, font="8p,Helvetica-Bold,navy", justify="LM")
+            #fig.text(text="Extension", x=legend_x, y=ex1_y - 0.3, font="8p,Helvetica-Bold,red2", justify="LM")
+            
+            #fig.text(
+            #    x=plot_region[1] - 1,
+            #    y=plot_region[3] - 0.5,
+            #    text=f"1=perfect match, 0=orthogonal, -1=opposite",
+            #    font="10p,Helvetica,black",
+            #    fill="white",
+            #    justify="TR",
+            #    pen="0.1p,black"
+            #)
+            if save_fig:
+                fig.savefig(f"{output_folder}/{output_filenames_prefix}_Tensor_Product_Map.pdf", dpi=600)
+            fig.show()
     return data, interp_data
+ 
 ########################################################################################################################
 ########################################################################################################################
 # Helper function to mask an xarray grid with user-defined polygons. I would have used GMT's grdmask, but it is not available in PyGMT
@@ -2296,7 +2739,8 @@ def compute_azimuth_differences(
         'lon': strain_rates['lon'],
         'lat': strain_rates['lat'],
         'azim_shortening': strain_rates['azim_shortening'],  # azimuth of the maximum shortening rate direction (-90 to 90 degrees)
-        'sec_inv': strain_rates['sec_inv']
+        'sec_inv': strain_rates['sec_inv'],
+        'sr_style': strain_rates['sr_style'], # added upon request of reviewer 1 who wanted to see if style influences the difference between strain and stress directions
     })
 
     # Create a DataFrame with lon, lat, and azimuth of the stress observations
@@ -2375,7 +2819,7 @@ def compute_azimuth_differences(
     merged_df = pd.merge(diff_azim_geod_stress, strain_rates, on=['lon', 'lat'], how='inner')
 
     # Select only relevant columns
-    merged_df = merged_df[['lon', 'lat', 'dif_azim', 'sec_inv']]
+    merged_df = merged_df[['lon', 'lat', 'dif_azim', 'sec_inv', 'sr_style']] # Added 'sr_style' column for manuscript revision
 
     # Drop NaN values from the DataFrame
     merged_df = merged_df.dropna().reset_index(drop=True)
@@ -4119,51 +4563,63 @@ def plot_residual_velocities(
     output_path,
     fault_file,
     vel_scale_pos = (32, 32.8),  # Position of the scale bar on the map (longitude, latitude)
-    vel_mag_ref_scale = 20, # Reference scale for the velocity magnitude scale vectors
-    vel_scaling_factor = 0.03,  # Scaling factor for the velocity vectors
+    vel_mag_ref_scale = 20,      # Reference scale for the velocity magnitude scale vectors
+    vel_scaling_factor = 0.03,   # Scaling factor for the velocity vectors
     vel_scale_label_offset = [0.6, -0.3],  # Offset for the velocity scale label in degrees
     plot_residual_histograms=True,
     relief_colormap="geo",
     path2_save_relief_colormap="input_data/cpts/emed_geo.cpt",
     histogram_transparent_box_style=None,  # Parameters for the transparent box for the histogram
     histograms_style={
-        'region':[-3.5, 3.5, 0, 40], # Region for the histograms
-        'projection':"X3.7c/3.7c", # Projection for the histograms
-        'frame_ve':["WNse+gwhite", "xf1a1+lV@-e@- residual (mm/yr)", "yf2.5a5+u%+lFrequency percent"], # Frame details for the histograms (East velocity residuals)
-        'frame_vn':["Nwse+gwhite", "xf1a1+l\"V@-n@- residual (mm/yr)\"", "yf2.5a5+u%+lFrequency percent"],  # Frame details for the histograms (North velocity residuals)
-        'series':[-4, 4, 0.5],  # Histogram range and bin interval
-        'pen':"0.2p,black",  # Outline the histogram bars
-        'histtype':1,  # Frequency percent
-        'fill':'gray',  # Fill the histogram bars with gray color
-        'distribution':None,  # Plot the distribution curve
-        'cumulative':False,  # Plot the cumulative distribution
+        'region':[-3.5, 3.5, 0, 40],
+        'projection':"X3.7c/3.7c",
+        'frame_ve':["WNse+gwhite", "xf1a1+lV@-e@- residual (mm/yr)", "yf2.5a5+u%+lFrequency percent"],
+        'frame_vn':["Nwse+gwhite", "xf1a1+l\"V@-n@- residual (mm/yr)\"", "yf2.5a5+u%+lFrequency percent"],
+        'series':[-4, 4, 0.5],
+        'pen':"0.2p,black",
+        'histtype':1,
+        'fill':'gray',
+        'distribution':None,
+        'cumulative':False,
     },
-    origin_shift_histogram1=[12.4, 0.2], # Shift applied to the origin of the first velocity profile (x, y) in cm
-    origin_shift_histogram2=[3.7, 0], # Shift applied to the origin of the first velocity profile (x, y) in cm
-    residual_legend_location="BL",  # Location for the residual velocity legend
-    colormap_series = [-5000, 5000, 100], # Series for the colormap
-    colormap_truncate = [-5000, 5000], # Truncate the colormap
-    map_scale_bar_position=[109.5, 26],  # Position (lon, lat) in degrees
-    map_scale_bar_length_km=500,  # Length of the map scale bar in km
-    colorbar_width=10,  # Width of the colorbar in cm
-    save_fig=True # Save the figure to a file
+    origin_shift_histogram1=[12.4, 0.2],
+    origin_shift_histogram2=[3.7, 0],
+    residual_legend_location="BL",
+    colormap_series = [-5000, 5000, 100],
+    colormap_truncate = [-5000, 5000],
+    map_scale_bar_position=[109.5, 26],
+    map_scale_bar_length_km=500,
+    colorbar_width=10,
+    save_fig=True,
+    compute_systematic_misfit_index=True,
+    radius_systematic_index_deg=0.35,   # degrees (~39 km near 40°N)
+    smi_cmap="turbo",
+    smi_series=(0, 1, 0.05),
 ):
     """
     Plot GNSS residual velocities along with optional histograms.
-    
+
     Args:
-    - data (DataFrame): DataFrame containing the residual velocity data with columns ['lon', 'lat', 've_res', 'vn_res'].
-    - region (list): List defining the region [west, east, south, north].
-    - output_path (str): Path where the output figure will be saved.
-    - fault_file (str): Path to the fault trace file for plotting.
-    - scale_origin (tuple): Tuple defining the longitude and latitude for the scale vector origin.
-    - vel_scaling_factor (float): Scaling factor for the velocity vectors (default is 0.1).
-    - plot_residual_histograms (bool): Flag to control whether histograms are plotted (default is True).
-    
-    Returns:
-    - None
+    - data (DataFrame): columns ['lon','lat','ve_res','vn_res'].
+    - region (list): [west, east, south, north].
+    - output_path (str): where to save the figure.
+    - fault_file (str): path to fault traces file.
     """
 
+    # --- Figure ---
+    fig = pygmt.Figure()
+
+    # --- Color palette (let GMT handle truncation/transparency) ---
+    pygmt.makecpt(
+        cmap=relief_colormap,
+        series=colormap_series,
+        truncate=colormap_truncate,
+        transparency=70,
+        background='o',
+        output=path2_save_relief_colormap
+    )
+
+    # --- Basemap and relief (limit grid rendering to region) ---
     # Create the second figure: Residual Velocities
     fig = pygmt.Figure()
 
@@ -4205,50 +4661,139 @@ def plot_residual_velocities(
     fig.coast(shorelines="0.2p,black", area_thresh=4000, resolution='h', water="white")
     fig.plot(data=fault_file, pen="0.1p,darkgrey")  # Add fault traces
 
-    # Plot residual velocities (gray vectors)
-    data['v_mag'] = np.sqrt(data['ve_res']**2 + data['vn_res']**2)
+    # --- Clean and compute residual vector geometry ---
+    valid = np.isfinite(data[['lon','lat','ve_res','vn_res']].values).all(axis=1)
+    data = data.loc[valid].copy()
+
+    data['v_mag'] = np.hypot(data['ve_res'], data['vn_res'])
+    # Avoid divide-by-zero for unit vectors
+    safe_mag = data['v_mag'].replace(0, np.nan)
+    data['ue'] = data['ve_res'] / safe_mag
+    data['un'] = data['vn_res'] / safe_mag
+
     data['direction'] = np.degrees(np.arctan2(data['vn_res'], data['ve_res']))
-    data['length'] = data['v_mag'] * vel_scaling_factor  # Scale factor for plotting
+    data['length'] = data['v_mag'] * vel_scaling_factor  # plotting length
 
-    # Prepare data for plotting residual vectors
-    #residual_vector_data = data[['lon', 'lat', 'direction', 'length']].values
+    # --- Systematic Misfit Index (fast cKDTree) ---
+    if compute_systematic_misfit_index:
+        lon = data['lon'].values
+        lat = data['lat'].values
+        ue  = data['ue'].values.copy()
+        un  = data['un'].values.copy()
 
-    fig.plot(
-        x=data['lon'],
-        y=data['lat'],
-        style='v0.2c+e+n0.3/0.2',
-        direction=[data['direction'], data['length']],
-        fill='gray25',
-        pen='gray25',
-        label=f'Residual velocities+S0.5c'
-    )
+        finite_unit = np.isfinite(ue) & np.isfinite(un)
+        #ue[~finite_unit] = 0.0
+        #un[~finite_unit] = 0.0
 
-    # Add legend
+        # Scale lon by cos(mean lat) so degrees behave more like an equal scale
+        lat0 = np.nanmedian(lat)
+        x = lon * np.cos(np.deg2rad(lat0))
+        y = lat
+        pts = np.column_stack([x, y])
+
+        tree = cKDTree(pts)
+        # radius in the same (deg,deg*cos(lat0)) space
+        idx_lists = tree.query_ball_point(pts, r=float(radius_systematic_index_deg))
+
+        smi = np.full(len(data), np.nan, float)
+        for i, neigh in enumerate(idx_lists):
+            if not finite_unit[i]:
+                continue
+            # drop self and non-finite neighbors
+            neigh = [j for j in neigh if (j != i) and finite_unit[j]]
+            if not neigh:
+                continue
+            dots = ue[i]*ue[neigh] + un[i]*un[neigh]
+            smi[i] = float(np.nanmean(dots))
+
+        data['systematic_misfit_index'] = np.abs(smi)
+
+        # Color map for SMI
+        pygmt.makecpt(cmap=smi_cmap, series=list(smi_series), continuous=True, background='o')
+
+        # Fast bulk plotting: columns [lon, lat, z, azimuth, length]
+        has_len = data['length'].to_numpy() > 0
+        has_smi = np.isfinite(data['systematic_misfit_index'].to_numpy())
+        mask = has_len & has_smi
+        if np.any(mask):
+            vec_array = np.column_stack([
+                data.loc[mask, 'lon'].to_numpy(),
+                data.loc[mask, 'lat'].to_numpy(),
+                data.loc[mask, 'systematic_misfit_index'].to_numpy(),
+                data.loc[mask, 'direction'].to_numpy(),
+                data.loc[mask, 'length'].to_numpy(),
+            ])
+            fig.plot(
+                data=vec_array,
+                style='v0.2c+e+n0.3/0.2',
+                fill='+z',
+                cmap=True,
+                pen='0.2p,black',
+            )
+            # plot a single extra black vector outside the study region (for the legend) 
+            fig.plot(
+                x=[region[0]-10],
+                y=[region[2]-10],
+                style='v0.5c+e+n0.3/0.2',
+                direction=[0, 2*vel_mag_ref_scale],
+                fill='gray25', pen='gray25',
+                label=f'Residual velocities'
+            )
+
+        # Gray vectors for NaN SMI or zero-length
+        no_color = (~has_smi) | (~has_len)
+        if np.any(no_color):
+            fig.plot(
+                x=data.loc[no_color, 'lon'],
+                y=data.loc[no_color, 'lat'],
+                style='v0.2c+e+n0.3/0.2',
+                direction=[data.loc[no_color, 'direction'], data.loc[no_color, 'length']],
+                fill='gray70', pen='gray70'
+            )
+
+        # SMI colorbar
+        fig.colorbar(
+            frame=r"af+lSystematic misfit index",
+            position=f"JMR+o0.5c/0c+w{colorbar_width}c+v"
+        )
+
+    else:
+        # Plain dark-gray residuals
+        # plot a single extra black vector outside the study region (for the legend) 
+        fig.plot(
+            x=[region[0]-10],
+            y=[region[2]-10],
+            style='v0.5c+e+n0.3/0.2',
+            direction=[0, 2*vel_mag_ref_scale],
+            fill='gray25', pen='gray25',
+            label=f'Residual velocities'
+        )
+        fig.plot(
+            x=data['lon'], y=data['lat'],
+            style='v0.2c+e+n0.3/0.2',
+            direction=[data['direction'], data['length']],
+            fill='gray25', pen='gray25',
+            #label=f'Residual velocities'
+        )
+        # Add colorbar
+        fig.colorbar(frame="af+lElevation (m)", position=f"JMR+o0.5c/0c+w{colorbar_width}c+v+ef", cmap="input_data/cpts/land_cbar.cpt")
+
+    # --- Legend ---
     fig.legend(position=f'J{residual_legend_location}+j{residual_legend_location}', box='+gwhite+p0.5p,black')
 
-    # Add colorbar
-    fig.colorbar(frame="af+lElevation (m)", position=f"JMR+o0.5c/0c+w{colorbar_width}c+v+ef", cmap="input_data/cpts/land_cbar.cpt")
+    # (Optional) Elevation colorbar 
+    # elev_pos = f"JMR+o2.5c/0c+w{colorbar_width}c+v+ef" if compute_systematic_misfit_index else f"JMR+o0.5c/0c+w{colorbar_width}c+v+ef"
+    # fig.colorbar(frame="af+lElevation (m)", position=elev_pos, cmap=path2_save_relief_colormap)
 
-    # Add scale vectors to the plot
-    scale_vector_length = vel_mag_ref_scale * vel_scaling_factor  # in mm/yr, this will be normalised
-    scale_vector_length_text = vel_mag_ref_scale  # in mm/yr, this will be displayed on the plot
-
+    # --- Scale vectors ---
+    scale_vector_length = vel_mag_ref_scale * vel_scaling_factor
     scale_vectors = [
-        [vel_scale_pos[0], vel_scale_pos[1], 0, scale_vector_length],  # Eastward vector
-        [vel_scale_pos[0], vel_scale_pos[1], 90, scale_vector_length]  # Northward vector
+        [vel_scale_pos[0], vel_scale_pos[1],   0, scale_vector_length],  # Eastward
+        [vel_scale_pos[0], vel_scale_pos[1],  90, scale_vector_length],  # Northward
     ]
-
-    # Plot the scale vectors
-    fig.plot(
-        style='v0.2c+e+n0.3/0.2',
-        data=scale_vectors,
-        fill='gray25',
-        pen='0.5p,gray25',
-    )
-
-    # Annotate the scale vectors
+    fig.plot(style='v0.2c+e+n0.3/0.2', data=scale_vectors, fill='gray25', pen='0.5p,gray25')
     fig.text(
-        text=f'{scale_vector_length_text} mm/yr',
+        text=f'{vel_mag_ref_scale} mm/yr',
         x=vel_scale_pos[0] + vel_scale_label_offset[0],
         y=vel_scale_pos[1] + vel_scale_label_offset[1],
         font='7p,black'
@@ -4257,52 +4802,58 @@ def plot_residual_velocities(
     with pygmt.config(FONT_ANNOT_PRIMARY='8p', FONT_LABEL='8p'):
         fig.basemap(map_scale=f"g{map_scale_bar_position[0]}/{map_scale_bar_position[1]}+w{map_scale_bar_length_km}k+f+lkm")
 
-    # Add histograms for residual velocities if enabled
+    # --- Histograms ---
     if plot_residual_histograms:
-        # Add transparent rectangle for histogram background
         if histogram_transparent_box_style:
-            fig.plot(x=histogram_transparent_box_style['x'], y=histogram_transparent_box_style['y'], style=histogram_transparent_box_style['style'], fill=histogram_transparent_box_style['fill'], pen=histogram_transparent_box_style['pen'], transparency=histogram_transparent_box_style['transparency'])
+            fig.plot(
+                x=histogram_transparent_box_style['x'],
+                y=histogram_transparent_box_style['y'],
+                style=histogram_transparent_box_style['style'],
+                fill=histogram_transparent_box_style['fill'],
+                pen=histogram_transparent_box_style['pen'],
+                transparency=histogram_transparent_box_style['transparency']
+            )
 
-        # Extract residual velocities
-        ve_residuals = data['ve_res']
-        vn_residuals = data['vn_res']
+        ve_residuals = data['ve_res'].to_numpy()
+        vn_residuals = data['vn_res'].to_numpy()
 
-        # Plot histograms for East and North components of residual velocities
-        with pygmt.config(FONT_ANNOT_PRIMARY='8p', FONT_LABEL='8p', MAP_FRAME_PEN='0.3p,black', MAP_TICK_PEN='0.3p,black'):
-            # Plot the histogram for V_e residuals
+        with pygmt.config(FONT_ANNOT_PRIMARY='8p', FONT_LABEL='8p',
+                          MAP_FRAME_PEN='0.3p,black', MAP_TICK_PEN='0.3p,black'):
+
             fig.shift_origin(xshift=f"{origin_shift_histogram1[0]}c", yshift=f"{origin_shift_histogram1[1]}c")
             fig.histogram(
                 data=ve_residuals,
-                region=histograms_style['region'],  # Set the region for the histogram
-                projection=histograms_style['projection'],  # Set the projection for the histogram
-                frame=histograms_style['frame_ve'],  # Labels
-                series=histograms_style['series'],  # Histogram range and bin interval
-                pen=histograms_style['pen'],   # Outline the histogram bars
-                histtype=histograms_style['histtype'],  # Frequency percent
-                fill=histograms_style['fill'], # Fill the histogram bars with gray color
-                distribution=histograms_style['distribution'],  # Plot the distribution curve
-                cumulative=histograms_style['cumulative'],  # Plot the cumulative distribution
+                region=histograms_style['region'],
+                projection=histograms_style['projection'],
+                frame=histograms_style['frame_ve'],
+                series=histograms_style['series'],
+                pen=histograms_style['pen'],
+                histtype=histograms_style['histtype'],
+                fill=histograms_style['fill'],
+                distribution=histograms_style['distribution'],
+                cumulative=histograms_style['cumulative'],
             )
 
-            # Plot the histogram for V_n residuals
             fig.shift_origin(xshift=f"{origin_shift_histogram2[0]}c", yshift=f"{origin_shift_histogram2[1]}c")
             fig.histogram(
                 data=vn_residuals,
-                region=histograms_style['region'],  # Set the region for the histogram
-                projection=histograms_style['projection'],  # Set the projection for the histogram
-                frame=histograms_style['frame_vn'],  # Labels
-                series=histograms_style['series'],  # Histogram range and bin interval
-                pen=histograms_style['pen'],  # Outline the histogram bars
-                histtype=histograms_style['histtype'],  # Frequency percent
-                fill=histograms_style['fill'],  # Fill the histogram bars with gray color
-                distribution=histograms_style['distribution'],  # Plot the distribution curve
-                cumulative=histograms_style['cumulative'],  # Plot the cumulative distribution
+                region=histograms_style['region'],
+                projection=histograms_style['projection'],
+                frame=histograms_style['frame_vn'],
+                series=histograms_style['series'],
+                pen=histograms_style['pen'],
+                histtype=histograms_style['histtype'],
+                fill=histograms_style['fill'],
+                distribution=histograms_style['distribution'],
+                cumulative=histograms_style['cumulative'],
             )
 
-    # Save and display the second figure
+    # --- Save and show (non-blocking in notebooks) ---
+    fig.show()
     if save_fig:
         fig.savefig(output_path, dpi=600)
-    fig.show()
+    
+
 
 ########################################################################################################################
 ########################################################################################################################
@@ -4371,6 +4922,7 @@ def plot_vel_strain_profiles(
     temp_bbox_directory='input_data/datasets/',
     delete_temp_files=True,
     save_fig=True,
+    model_horiz_vel_field_file=None,
 ):
     # Ensure output folder exists
     os.makedirs(output_folder, exist_ok=True)
@@ -4389,9 +4941,35 @@ def plot_vel_strain_profiles(
     vert_cols = ['Lon', 'Lat', 'Vz', 'sigma_vz', 'Stat'] #pd.read_csv(vert_vel_field_file, skiprows=1, header=None, , names=vert_cols)
     vert_vel_data = pd.read_csv(vert_vel_field_file, skiprows=1, header=None, names=vert_cols)
 
+    # Read modeled horizontal velocity data (optional)
+    if model_horiz_vel_field_file:
+        # Expected columns: Lon, Lat, V_E, V_N, S_E, S_N (S_* are 2-sigma)
+        model_cols = ['Lon', 'Lat', 'V_E', 'V_N', 'S_E', 'S_N']
+        try:
+            model_vel_data = pd.read_csv(model_horiz_vel_field_file, header=0, usecols=model_cols)
+        except Exception:
+            model_vel_data = pd.read_csv(model_horiz_vel_field_file)
+            lower_map = {c.lower(): c for c in model_vel_data.columns}
+            for expected in ['lon', 'lat', 'v_e', 'v_n', 's_e', 's_n']:
+                if expected not in lower_map:
+                    raise
+            model_vel_data = model_vel_data.rename(columns={
+                lower_map['lon']: 'Lon',
+                lower_map['lat']: 'Lat',
+                lower_map['v_e']: 'V_E',
+                lower_map['v_n']: 'V_N',
+                lower_map['s_e']: 'S_E',
+                lower_map['s_n']: 'S_N',
+            })
+    else:
+        # Empty DataFrame with expected columns to simplify downstream checks
+        model_vel_data = pd.DataFrame(columns=['Lon','Lat','V_E','V_N','S_E','S_N'])
+
     # Normalise longitudes to the -180 to 180 range
     horiz_vel_data['Lon'] = horiz_vel_data['Lon'].apply(lambda x: x - 360 if x > 180 else x)
     vert_vel_data['Lon'] = vert_vel_data['Lon'].apply(lambda x: x - 360 if x > 180 else x)
+    if not model_vel_data.empty:
+        model_vel_data['Lon'] = model_vel_data['Lon'].apply(lambda x: x - 360 if x > 180 else x)
 
     # Prepare strain rate data (columns: 'lon', 'lat', 'sec_inv', 'dilat')
     strain_rate_df = strain_rate_df[['lon', 'lat', 'sec_inv', 'dilat']].copy()
@@ -4493,6 +5071,16 @@ def plot_vel_strain_profiles(
         horiz_vel_in_bbox = horiz_vel_data[in_bbox].copy()
         horiz_vel_in_bbox.dropna(subset=['E.vel', 'N.vel'], inplace=True)
 
+        # Modeled horizontal velocities
+        if not model_vel_data.empty:
+            in_bbox_model = points_in_polygon(
+                model_vel_data['Lon'], model_vel_data['Lat'], bbox_polygon
+            )
+            model_vel_in_bbox = model_vel_data[in_bbox_model].copy()
+            model_vel_in_bbox.dropna(subset=['V_E', 'V_N', 'S_E', 'S_N'], inplace=True)
+        else:
+            model_vel_in_bbox = pd.DataFrame(columns=['Lon','Lat','V_E','V_N','S_E','S_N'])
+
         # Vertical velocities
         in_bbox_vert = points_in_polygon(
             vert_vel_data['Lon'], vert_vel_data['Lat'], bbox_polygon
@@ -4518,6 +5106,12 @@ def plot_vel_strain_profiles(
             vert_vel_in_bbox['Lon'], vert_vel_in_bbox['Lat'], start_lon, start_lat
         )
 
+        # Distances for modeled velocities
+        if not model_vel_in_bbox.empty:
+            model_vel_in_bbox['dist_along_profile'] = compute_distances_along_profile(
+                model_vel_in_bbox['Lon'], model_vel_in_bbox['Lat'], start_lon, start_lat
+            )
+
         # Project velocities onto profile-parallel and profile-normal components
         profile_azimuth_rad = np.radians((90 - az12) % 360)
         pp_unit_vector = np.array([np.cos(profile_azimuth_rad), np.sin(profile_azimuth_rad)])
@@ -4532,6 +5126,22 @@ def plot_vel_strain_profiles(
 
         horiz_vel_in_bbox['pp_vel'] = pp_velocities
         horiz_vel_in_bbox['pn_vel'] = pn_velocities
+
+        # Project modeled velocities if present
+        if not model_vel_in_bbox.empty:
+            me = model_vel_in_bbox['V_E'].values
+            mn = model_vel_in_bbox['V_N'].values
+            mvec = np.vstack((me, mn)).T
+            model_vel_in_bbox['pp_vel'] = mvec @ pp_unit_vector
+            model_vel_in_bbox['pn_vel'] = mvec @ pn_unit_vector
+            # Propagate 2-sigma uncertainties to PP/PN assuming independence (no covariance)
+            c = np.cos(profile_azimuth_rad)
+            s = np.sin(profile_azimuth_rad)
+            s_e = model_vel_in_bbox['S_E'].values
+            s_n = model_vel_in_bbox['S_N'].values
+            model_vel_in_bbox['pp_2sigma'] = np.sqrt((c * s_e) ** 2 + (s * s_n) ** 2)
+            model_vel_in_bbox['pn_2sigma'] = np.sqrt(((-s) * s_e) ** 2 + (c * s_n) ** 2)
+            model_vel_in_bbox.sort_values(by='dist_along_profile', inplace=True)
 
         # Extract strain rate data within the bounding box
         in_bbox_strain = points_in_polygon(
@@ -4586,8 +5196,12 @@ def plot_vel_strain_profiles(
 
             # Profile-parallel velocities
             with fig_profile.set_panel(panel=panel_index):
+                # Incorporate modeled band into y-limits if available
                 y_min = pp_velocities.min()
                 y_max = pp_velocities.max()
+                if not model_vel_in_bbox.empty:
+                    y_min = min(y_min, (model_vel_in_bbox['pp_vel'] - model_vel_in_bbox['pp_2sigma']).min())
+                    y_max = max(y_max, (model_vel_in_bbox['pp_vel'] + model_vel_in_bbox['pp_2sigma']).max())
                 # find the maximum magnitude 
                 max_val = max(abs(y_min), abs(y_max))
                 fig_profile.basemap(
@@ -4595,6 +5209,18 @@ def plot_vel_strain_profiles(
                     projection="X?",
                     frame=[f'Wsrt+b"{profile_name}: Profile-Parallel Velocities"', "xaf", "yaf+lAlong-profile vel."],
                 )
+                # Plot modeled PP ±2σ as a light grey band (under observed dots)
+                if not model_vel_in_bbox.empty:
+                    x_band = model_vel_in_bbox['dist_along_profile'].values
+                    y_lower = (model_vel_in_bbox['pp_vel'] - model_vel_in_bbox['pp_2sigma']).values
+                    y_upper = (model_vel_in_bbox['pp_vel'] + model_vel_in_bbox['pp_2sigma']).values
+                    fig_profile.plot(
+                        x=np.concatenate([x_band, x_band[::-1]]),
+                        y=np.concatenate([y_lower, y_upper[::-1]]),
+                        fill="lightgray",
+                        pen=None,
+                        transparency=40,
+                    )
                 # Create CPT
                 pygmt.makecpt(cmap='roma', series=[-max_val, max_val], reverse=True)
                 # Plot data with color
@@ -4616,8 +5242,12 @@ def plot_vel_strain_profiles(
 
             # Profile-normal velocities
             with fig_profile.set_panel(panel=panel_index):
+                # Incorporate modeled band into y-limits if available
                 y_min = pn_velocities.min()
                 y_max = pn_velocities.max()
+                if not model_vel_in_bbox.empty:
+                    y_min = min(y_min, (model_vel_in_bbox['pn_vel'] - model_vel_in_bbox['pn_2sigma']).min())
+                    y_max = max(y_max, (model_vel_in_bbox['pn_vel'] + model_vel_in_bbox['pn_2sigma']).max())
                 # find the maximum magnitude 
                 max_val = max(abs(y_min), abs(y_max))
                 fig_profile.basemap(
@@ -4625,6 +5255,18 @@ def plot_vel_strain_profiles(
                     projection="X?",
                     frame=["Wsrt", "xaf", "yaf+lAcross-profile vel."],
                 )
+                # Plot modeled PN ±2σ as a light grey band
+                if not model_vel_in_bbox.empty:
+                    x_band = model_vel_in_bbox['dist_along_profile'].values
+                    y_lower = (model_vel_in_bbox['pn_vel'] - model_vel_in_bbox['pn_2sigma']).values
+                    y_upper = (model_vel_in_bbox['pn_vel'] + model_vel_in_bbox['pn_2sigma']).values
+                    fig_profile.plot(
+                        x=np.concatenate([x_band, x_band[::-1]]),
+                        y=np.concatenate([y_lower, y_upper[::-1]]),
+                        fill="lightgray",
+                        pen=None,
+                        transparency=40,
+                    )
                 # Create CPT
                 pygmt.makecpt(cmap='cork', series=[-max_val, max_val])
                 # Plot data with color
@@ -4686,7 +5328,7 @@ def plot_vel_strain_profiles(
                 fig_profile.basemap(
                     region=[0, profile_length_km, 0, y_max+0.1*y_max],
                     projection="X?",
-                    frame=["Wsrt", "xaf", "yaf+lSecond invariant"],
+                    frame=["Wsrt", "xaf", "yaf+lFrobenius norm"],
                 )
                 # Create CPT
                 pygmt.makecpt(cmap='turbo', series=[y_min, y_max], background='o')

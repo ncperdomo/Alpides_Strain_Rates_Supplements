@@ -235,6 +235,12 @@ def plot_azimuths_with_differences(
     box_histogram_label_x = 0,  # X position for the label in histogram coordinates
     box_histogram_label_y = 10,  # Y position for the label in histogram coordinates
     cbar_frame='a30f10+lAzimuth difference (max. stretching rate - SKS)',
+    plot_shear_reference_lines=True,  # Plot thin grey dashed lines at ±45°
+    plot_box_for_more_histogram=False, # Plot the box around histogram
+    box_for_more_histogram_position=[95, 19.5],  # Position (lon, lat) in degrees
+    box_for_more_histogram_style="r8.5/4",  # Style for the box around histogram
+    box_for_more_histogram_fill="white",  # Fill color for the box around histogram
+    box_for_more_histogram_transparency=30,  # Transparency for the box around histogram
     save_fig=True,
 ):
     """
@@ -362,6 +368,9 @@ def plot_azimuths_with_differences(
     if box_additional_histograms:
         fig.plot(x=box_additionalhistogram_position[0], y=box_additionalhistogram_position[1], style=box_additional_histograms_style, fill=box_additional_histograms_fill, pen=None, transparency=box_additional_histograms_transparency)
         #fig.plot(x=box_histogram_position[0]+2, y=box_histogram_position[1], style=box_histogram_style, fill=box_histogram_fill, pen=None, transparency=box_histogram_transparency)
+    if plot_box_for_more_histogram:
+        fig.plot(x=box_for_more_histogram_position[0], y=box_for_more_histogram_position[1], style=box_for_more_histogram_style, fill=box_for_more_histogram_fill, pen=None, transparency=box_for_more_histogram_transparency)
+        #fig.plot(x=box_histogram_position[0]+2, y=box_histogram_position[1], style=box_histogram_style, fill=box_histogram_fill, pen=None, transparency=box_histogram_transparency)
 
 
     with pygmt.config(FONT_ANNOT_PRIMARY=hist_annot_primary, FONT_LABEL=hist_font_label, MAP_FRAME_PEN='0.3p,black', MAP_TICK_PEN='0.3p,black'):
@@ -377,6 +386,16 @@ def plot_azimuths_with_differences(
             pen="0.2p,black",  # Outline the histogram bars
             histtype=1,  # Frequency percent
         )
+
+        # Draw reference lines at ±45° (max shear directions)
+        if plot_shear_reference_lines:
+            _ymax = 11
+            for _x in (-45, 45):
+                fig.plot(
+                    x=[_x, _x], y=[0, _ymax],
+                    region=[-90, 90, 0, _ymax], projection=hist_projection,
+                    pen="0.5p,gray70,-",
+                )
 
         # Add label to the box around the main histogram
         if box_histogram_label is not None:
@@ -479,6 +498,20 @@ def plot_azimuths_with_differences(
                     "xf10a30+lAzimuth difference",
                     "yf2.5a5+u%"  # Y-axis annotations
                 ]
+
+            elif hist_name == "hist3_with_y_axis_annotations_and_label":
+                histogram_frame = [
+                    "ENsw+gwhite",
+                    "xf10a30+lAzimuth difference",
+                    "yf2.5a5+u%"  # Y-axis annotations
+                ]
+
+            elif hist_name == "hist4_with_y_axis_annotations":
+                histogram_frame = [
+                    "ENsw+gwhite",
+                    "xf10a30+lAzimuth difference",
+                    "yf2.5a5+u%+lFrequency percent"  # Y-axis annotations
+                ]
             
             else:  # No Y-axis annotations for other histograms
                 histogram_frame = [
@@ -493,6 +526,16 @@ def plot_azimuths_with_differences(
                     projection=hist_details['projection'], frame=histogram_frame, # Frame details for the histogram
                     series=[-90, 90, 10], cmap=True, pen="0.2p,black", histtype=1
                 )
+                # Reference lines at ±45° for additional histograms
+                if plot_shear_reference_lines:
+                    _xyb = hist_details['xybounds']
+                    _ymax = _xyb[3]
+                    for _x in (-45, 45):
+                        fig.plot(
+                            x=[_x, _x], y=[0, _ymax],
+                            region=_xyb, projection=hist_details['projection'],
+                            pen="0.5p,gray70,-",
+                        )
                 # Add label if specified
                 if 'label' in hist_details and 'x_pos' in hist_details and 'y_pos' in hist_details:
                     fig.text(
@@ -740,6 +783,7 @@ def plot_apm_sks_azimuth_differences(
     box_histogram_label_x=0,
     box_histogram_label_y=10,
     cbar_frame='a30f10+lAzimuth difference (APM - SKS)',
+    plot_shear_reference_lines=True,
     save_fig=True,
 ):
     """
@@ -906,6 +950,14 @@ def plot_apm_sks_azimuth_differences(
             pen="0.2p,black",
             histtype=1,
         )
+        if plot_shear_reference_lines:
+            _ymax = 12.5
+            for _x in (-45, 45):
+                fig.plot(
+                    x=[_x, _x], y=[0, _ymax],
+                    region=[-90, 90, 0, _ymax], projection=hist_projection,
+                    pen="0.3p,gray,-",
+                )
         if box_histogram_label is not None:
             if not box_histogram_label_x and not box_histogram_label_y:
                 print("Please provide the x and y coordinates for the histogram label")
@@ -980,6 +1032,15 @@ def plot_apm_sks_azimuth_differences(
                     projection=hist_details['projection'], frame=histogram_frame,
                     series=[-90, 90, 10], cmap=True, pen="0.2p,black", histtype=1
                 )
+                if plot_shear_reference_lines:
+                    _xyb = hist_details['xybounds']
+                    _ymax = _xyb[3]
+                    for _x in (-45, 45):
+                        fig.plot(
+                            x=[_x, _x], y=[0, _ymax],
+                            region=_xyb, projection=hist_details['projection'],
+                            pen="0.3p,gray,-",
+                        )
                 if 'label' in hist_details and 'x_pos' in hist_details and 'y_pos' in hist_details:
                     fig.text(
                         x=hist_details['x_pos'],
@@ -991,3 +1052,4 @@ def plot_apm_sks_azimuth_differences(
     if save_fig:
         fig.savefig(output_file, dpi=600)
     fig.show()
+
